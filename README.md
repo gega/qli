@@ -6,6 +6,7 @@ QLI is Quite Light Image format inspired by QOI
 - RGB565 support
 - Streaming support
 - No heap usage
+- Static configuration
 - Reduced index array for embedded devices
 - Little/Big endian encoding supported
 - No alpha channel
