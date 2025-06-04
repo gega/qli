@@ -12,6 +12,11 @@
 #endif
 
 // configuration value
+#ifndef QLI_NOSTDIO
+#define QLI_NOSTDIO 0
+#endif
+
+// configuration value
 #ifndef QLI_PIXEL_FORMAT
 #define QLI_PIXEL_FORMAT QLI_PF_RGB565
 #endif
@@ -35,7 +40,6 @@
 #define QLI_LITTLE_ENDIAN (QLI_BPP-1)
 #define QLI_BIG_ENDIAN    (0)
 
-
 // configuration value
 #ifndef QLI_ENDIAN
 #define QLI_ENDIAN QLI_LITTLE_ENDIAN
@@ -54,6 +58,10 @@
 #define QLI_MAGIC1 'l'
 #define QLI_MAGIC2 'i'
 #define QLI_MAGIC3 '1'
+
+#if QLI_NOSTDIO == 0
+#include <stdio.h>
+#endif
 
 
 struct qli_file
@@ -94,7 +102,9 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
 
 #ifdef QLI_ENCODE
 int QLI_FUNC_NAME(qli_encode,QLI_POSTFIX) (uint32_t *rgb, int width, int height, uint8_t *buf, size_t bufsize);
+#if QLI_NOSTDIO == 0
 int QLI_FUNC_NAME(qli_save,QLI_POSTFIX) (uint32_t *rgb, int width, int height, char *file);
+#endif
 #endif
 
 #define QLI_HEADER_LEN (10)
@@ -414,6 +424,7 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
   return(out_cnt);
 }
 
+#if QLI_NOSTDIO == 0
 int QLI_FUNC_NAME(qli_save, QLI_POSTFIX) (uint32_t *rgb, int width, int height, char *file)
 {
   uint8_t *buf;
@@ -446,6 +457,7 @@ int QLI_FUNC_NAME(qli_save, QLI_POSTFIX) (uint32_t *rgb, int width, int height, 
   free(buf);
   return(ret);
 }
+#endif
 
 #endif
 
