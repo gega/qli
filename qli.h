@@ -22,6 +22,11 @@
 #endif
 
 // configuration value
+#ifndef QLI_ENABLE_MULTIRUN
+#define QLI_ENABLE_MULTIRUN 0
+#endif
+
+// configuration value
 #ifndef QLI_USERDATA
 #define QLI_USERDATA
 #endif
@@ -83,7 +88,10 @@ struct qli_image
   uint8_t *data;
   uint8_t index[QLI_BPP][1L<<QLI_INDEX_SIZE];
   uint8_t px[QLI_BPP];
-  uint8_t run;
+  uint32_t run;
+#if QLI_ENABLE_MULTIRUN != 0
+  uint32_t run_prev;
+#endif
   QLI_USERDATA
 };
 
@@ -115,21 +123,27 @@ int QLI_FUNC_NAME(qli_save,QLI_POSTFIX) (uint32_t *rgb, int width, int height, c
 
 #ifdef QLI_IMPLEMENTATION
 
-static const int qli_index_code[]={0,0,0,0,1,2,3,0};
+#define QLI_MAX_FACTORS (4)
+#define QLI_MAX_SEARCH_DEPTH (5)
+#define QLI_MAX_RUN_VALUE (63)
+
+#define QLI_CMD_MASK ((uint8_t)(0xc0))
 
 // opcodes from QOI
-#define QLI_OP_RGB   (0xff)
-#define QLI_OP_INDEX (0x00)
-#define QLI_OP_DIFF  (0x40)
-#define QLI_OP_LUMA  (0x80)
-#define QLI_OP_RUN   (0xc0)
+#define QLI_OP_RGB     (0xff)
+#define QLI_OP_INDEX   (0x00)
+#define QLI_OP_DIFF    (0x40)
+#define QLI_OP_LUMA    (0x80)
+#define QLI_OP_RUN     (0xc0)
+#define QLI_OP_INVALID (uint8_t)(~QLI_CMD_MASK)
 
 #ifndef ABS
 #define ABS(N) ((N) < 0 ? -(N) : (N))
 #endif
 
 
-#define QLI_CMD_MASK (0xc0)
+static const uint8_t qli_index_code[]={0,0,0,0,1,2,3,0};
+
 
 
 #if QLI_PIXEL_FORMAT == QLI_PF_RGB565
@@ -175,6 +189,9 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli)
     qli->pos=0;
     memset(qli->index,0,sizeof(qli->index));
     qli->run=0;
+#if QLI_ENABLE_MULTIRUN != 0
+    qli->run_prev=0;
+#endif
     memset(qli->px,0,sizeof(qli->px));
   }
 }
@@ -250,6 +267,9 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       fprintf(stderr,"%02x%02x QLI_OP_RGB 0x%04x [%02x %02x %02x]\n",qli->px[0],qli->px[1],qli->px[0]<<8|qli->px[1],PX_GET_RED(qli->px), PX_GET_GREEN(qli->px), PX_GET_BLUE(qli->px));
       #endif
       qli->run=1;
+#if QLI_ENABLE_MULTIRUN != 0
+      qli->run_prev=0;
+#endif
     }
     else if(QLI_OP_INDEX == cm)
     {
@@ -259,6 +279,9 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       fprintf(stderr,"%02x%02x QLI_OP_INDEX %d %02x %02x %02x\n",qli->px[0],qli->px[1],d1,PX_GET_RED(qli->px), PX_GET_GREEN(qli->px), PX_GET_BLUE(qli->px));
       #endif
       qli->run=1;
+#if QLI_ENABLE_MULTIRUN != 0
+      qli->run_prev=0;
+#endif
     }
     else if(QLI_OP_DIFF == cm)
     {
@@ -278,6 +301,9 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       for(int i=0;i<QLI_BPP;i++) qli->px[i] = (rgb>>(8*(QLI_BPP-i-1)))&0xff;
       QLI_UPDATE_INDEX(qli, qli->px);
       qli->run=1;
+#if QLI_ENABLE_MULTIRUN != 0
+      qli->run_prev=0;
+#endif
     }
     else if(QLI_OP_LUMA == cm)
     {
@@ -296,13 +322,29 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       #endif
       QLI_UPDATE_INDEX(qli, qli->px);
       qli->run=1;
+#if QLI_ENABLE_MULTIRUN != 0
+      qli->run_prev=0;
+#endif
     }
     else if(QLI_OP_RUN == cm)
     {
       #if QLI_DEBUG != 0
       fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",qli->px[0],qli->px[1],1+(d1&0x3f), PX_GET_RED(qli->px), PX_GET_GREEN(qli->px), PX_GET_BLUE(qli->px) );
       #endif
+#if QLI_ENABLE_MULTIRUN != 0
+      if(qli->run_prev > 0)
+      {
+        qli->run=(qli->run_prev*(1+(d1&0x3f)))-qli->run_prev;
+        qli->run_prev+=qli->run;
+      }
+      else
+      {
+        qli->run=1+(d1&0x3f);
+        qli->run_prev=qli->run;
+      }
+#else
       qli->run=1+(d1&0x3f);
+#endif
     }
   }
   
@@ -319,6 +361,55 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
 #define RGB32_GREEN(p32) (uint8_t)((((uint32_t)p32)>>16)&0xff)
 #define RGB32_BLUE(p32)  (uint8_t)((((uint32_t)p32)>>8)&0xff)
 
+#if QLI_ENABLE_MULTIRUN != 0
+struct qli_fs_track
+{
+  int found_solution;
+  long best_product;
+  int best_N;
+  int best_factors[QLI_MAX_FACTORS];
+};
+
+static void qli_factor_search(int X, int C, int N, int depth, long current_product, int *current_factors, int start, struct qli_fs_track *glb)
+{
+  if(depth>QLI_MAX_SEARCH_DEPTH) return;
+  if(depth==N)
+  {
+    if(current_product>X-C && current_product<=X)
+    {
+      glb->best_product = current_product;
+      glb->best_N = N;
+      for (int i=0; i<N; i++) glb->best_factors[i] = current_factors[i];
+      glb->found_solution = 1;
+    }
+    return;
+  }
+  for(int i=start; i<C; i++)
+  {
+    long new_product = current_product * i;
+    if(new_product>X) continue;
+    current_factors[depth] = i;
+    qli_factor_search(X, C, N, depth+1, new_product, current_factors, i, glb);
+    if(glb->found_solution) return;
+  }
+}
+
+static int qli_factors(int X, struct qli_fs_track *glb)
+{
+  int current_factors[QLI_MAX_FACTORS]={0};
+  const int C=QLI_MAX_RUN_VALUE;
+
+  for(int N=1; N<=QLI_MAX_FACTORS; N++)
+  {
+    glb->found_solution=0;
+    glb->best_product=0;
+    glb->best_N=0;
+    qli_factor_search(X, C, N, 0, 1, current_factors, 1, glb);
+    if(glb->found_solution) return(N);
+  }
+  return(0);
+}
+#endif
 
 /* encoding RGB32 buffer with RGBx format and given dmensions to buf
  *
@@ -346,31 +437,82 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
   {
     pix=rgb[pos];
     ppx=RGB_PACK(RGB32_RED(pix), RGB32_GREEN(pix), RGB32_BLUE(pix));
-    for(int i=0;i<QLI_BPP;i++) px[i] = (ppx>>(8*(QLI_BPP-i-1)))&0xff;
-    if(ppx==ppx_prev)
+    for(i=0;i<QLI_BPP;i++) px[i] = (ppx>>(8*(QLI_BPP-i-1)))&0xff;
+    if(ppx==ppx_prev && pos<end-1)
     {
       run++;
-      if(run==63||pos==end-1)
-      {
-        if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|(run-1);
-        out_cnt++;
-        #if QLI_DEBUG != 0
-        fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",px[0],px[1],run, PACK_GET_RED(ppx), PACK_GET_GREEN(ppx), PACK_GET_BLUE(ppx));
-        #endif
-        run=0;
-      }
       continue;
     }
+    int idx=QLI_GET_INDEX(px);
     if(run>0)
     {
-      if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|(run-1);
-      #if QLI_DEBUG != 0
-      fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",ppx_prev>>8,ppx_prev&0xff, run, PACK_GET_RED(ppx_prev), PACK_GET_GREEN(ppx_prev), PACK_GET_BLUE(ppx_prev));
-      #endif
+#if QLI_ENABLE_MULTIRUN != 0
+      struct qli_fs_track trk;
+      memset(&trk, 0, sizeof(trk));
+      int remainder=0;
+      int n=qli_factors(run, &trk);
+      if(n>1)
+      {
+        // multiplied runs
+        long mult=1;
+        for(i=0; i<trk.best_N; i++)
+        {
+          mult*=trk.best_factors[i];
+          if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|(trk.best_factors[i]-1);
+          out_cnt++;
+          #if QLI_DEBUG != 0
+          fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",ppx_prev>>8,ppx_prev&0xff, trk.best_factors[i], PACK_GET_RED(ppx_prev), PACK_GET_GREEN(ppx_prev), PACK_GET_BLUE(ppx_prev));
+          #endif
+        }
+        remainder=run-mult;
+      }
+      else if(run<=QLI_MAX_RUN_VALUE)
+      {
+        // one run
+        if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|(run-1);
+        #if QLI_DEBUG != 0
+        fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",ppx_prev>>8,ppx_prev&0xff, run, PACK_GET_RED(ppx_prev), PACK_GET_GREEN(ppx_prev), PACK_GET_BLUE(ppx_prev));
+        #endif
+        out_cnt++;
+      }
+      else
+      {
+        // larger than QLI_MAX_RUN_VALUE but less than 2*QLI_MAX_RUN_VALUE
+        if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|(QLI_MAX_RUN_VALUE-1);
+        #if QLI_DEBUG != 0
+        fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",ppx_prev>>8,ppx_prev&0xff, QLI_MAX_RUN_VALUE, PACK_GET_RED(ppx_prev), PACK_GET_GREEN(ppx_prev), PACK_GET_BLUE(ppx_prev));
+        #endif
+        out_cnt++;
+        remainder=run-QLI_MAX_RUN_VALUE;
+      }
+      if(remainder>0)
+      {
+        // INDEX or NOP + run (remainder-1)
+        if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_INDEX|(idx);
+        #if QLI_DEBUG != 0
+        fprintf(stderr,"%02x%02x QLI_OP_INDEX %d %02x %02x %02x\n",px[0],px[1],idx, PX_GET_RED(px), PX_GET_GREEN(px), PX_GET_BLUE(px));
+        #endif
+        out_cnt++;
+        remainder--;
+        if(remainder>0)
+        {
+          if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|(remainder-1);
+          #if QLI_DEBUG != 0
+          fprintf(stderr,"%02x%02x QLI_OP_RUN %d %02x %02x %02x\n",ppx_prev>>8,ppx_prev&0xff, remainder, PACK_GET_RED(ppx_prev), PACK_GET_GREEN(ppx_prev), PACK_GET_BLUE(ppx_prev));
+          #endif
+          out_cnt++;
+        }
+      }
+#else
+      while(run>0)
+      {
+        if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|( ((run-QLI_MAX_RUN_VALUE)>0 ? QLI_MAX_RUN_VALUE : run) - 1 );
+        run-=QLI_MAX_RUN_VALUE;
+        out_cnt++;
+      }
+#endif
       run=0;
-      out_cnt++;
     }
-    int idx=QLI_GET_INDEX(px);
     for(i=res=0;i<QLI_BPP;i++) res|=(px[i]^img.index[i][idx]);
     if(res==0)
     {
