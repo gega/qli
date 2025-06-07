@@ -91,7 +91,16 @@
 #endif
 #endif
 
-#define QLI_INDEX_SIZE 4
+#ifdef QLI_ENCODE
+#ifndef QLI_DECODE
+#define QLI_DECODE
+#endif
+#endif
+
+// configuration value
+#ifndef QLI_INDEX_SIZE
+#define QLI_INDEX_SIZE 6
+#endif
 
 #define QLI_MAGIC0 'q'
 #define QLI_MAGIC1 'l'
@@ -103,22 +112,14 @@
 #endif
 
 
-struct qli_file
-{
-  char magic[4];
-  uint16_t width;
-  uint16_t height;
-  uint8_t pixel_format;
-  uint8_t flags; 	// bit 0-1:index-size (0: 3, 1: 4, 2: 5, 3: 6)
-  uint8_t data[];
-};
-
 struct qli_image
 {
   uint16_t width;
   uint16_t height;
+  uint16_t stride;
   uint32_t pos;
   uint32_t size;
+  uint16_t x;
   uint8_t *data;
   uint8_t index[QLI_BPP][1L<<QLI_INDEX_SIZE];
   uint8_t px[QLI_BPP];
@@ -136,14 +137,14 @@ struct qli_image
 
 
 #ifdef QLI_DECODE
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint8_t *data, uint32_t data_size);
+int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, uint32_t data_size);
 int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, uint32_t size);
 void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli);
 int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt);
 #endif
 
 #ifdef QLI_ENCODE
-int QLI_FUNC_NAME(qli_encode,QLI_POSTFIX) (uint32_t *rgb, int width, int height, uint8_t *buf, size_t bufsize);
+int QLI_FUNC_NAME(qli_encode,QLI_POSTFIX) (uint32_t *rgb, int width, int height, int stride, uint8_t *buf, size_t bufsize);
 #if QLI_NOSTDIO == 0
 int QLI_FUNC_NAME(qli_save,QLI_POSTFIX) (uint32_t *rgb, int width, int height, char *file);
 #endif
@@ -179,7 +180,6 @@ int QLI_FUNC_NAME(qli_save,QLI_POSTFIX) (uint32_t *rgb, int width, int height, c
 static const uint8_t qli_index_code[]={0,0,0,0,1,2,3,0};
 
 
-
 #if QLI_PIXEL_FORMAT == QLI_PF_RGB565
  typedef uint16_t qli_pixel_t;
  /*         --------
@@ -191,7 +191,7 @@ static const uint8_t qli_index_code[]={0,0,0,0,1,2,3,0};
  #define G_FACTOR (4)
  #define B_FACTOR (8)
  #define QLI_CLAMP255(x) (((x) > 255) ? 255 : (x))
- #define RGB_PACK(r, g, b) ( \
+ #define QLI_RGB_PACK(r, g, b) ( \
     ((QLI_CLAMP255((r) + 4) >> 3) << 11) | \
     ((QLI_CLAMP255((g) + 2) >> 2) << 5)  | \
     ((QLI_CLAMP255((b) + 4) >> 3)) )
@@ -223,6 +223,7 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli)
     qli->pos=0;
     memset(qli->index,0,sizeof(qli->index));
     qli->run=0;
+    qli->x=0;
 #if QLI_ENABLE_MULTIRUN != 0
     qli->run_prev=0;
 #endif
@@ -232,11 +233,12 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli)
 
 /* init user allocated qli struct
  */
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint8_t *data, uint32_t data_size)
+int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, uint32_t data_size)
 {
   if(NULL==qli) return(-1);
   qli->width = width;
   qli->height = height;
+  qli->stride = stride;
   qli->data = data;
   qli->size = data_size;
   QLI_FUNC_NAME(qli_rewind,QLI_POSTFIX) (qli);
@@ -253,6 +255,7 @@ int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t 
   header+=4;
   qli->width=header[0]<<8|header[1];
   qli->height=header[2]<<8|header[3];
+  qli->stride=qli->width*QLI_BPP;
   if(QLI_PIXEL_FORMAT!=header[4]) return(-1);
   int flags=header[5];
   if(qli_index_code[QLI_INDEX_SIZE]!=((flags)&3)) return(-1);
@@ -273,15 +276,21 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
   int ret=0;
   uint8_t d1;
   int i;
-  
+
   if(pixel_cnt == 0) return(0);
   if(!qli || !dest) return(-1);
-  
+
   while(pixel_cnt>0 && qli->pos<=qli->size)
   {
     if(qli->run>0)
     {
       for(i=0;i<QLI_BPP;i++) *dest++ = qli->px[ABS(QLI_ENDIAN-i)];
+      qli->x++;
+      if(qli->x==qli->width)
+      {
+        qli->x=0;
+        if(0!=qli->stride) dest+=qli->stride-(qli->width*QLI_BPP);
+      }
       ret++;
       --pixel_cnt;
       --qli->run;
@@ -325,7 +334,7 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       r += R_FACTOR * (((d1 >> 4) & 0x03) - 2);
       g += G_FACTOR * (((d1 >> 2) & 0x03) - 2);
       b += B_FACTOR * (( d1       & 0x03) - 2);
-      qli_pixel_t rgb = RGB_PACK(r,g,b);
+      qli_pixel_t rgb = QLI_RGB_PACK(r,g,b);
       #if QLI_DEBUG != 0
       fprintf(stderr,"%02x%02x QLI_OP_DIFF %d %d %d : %02x %02x %02x => %02x %02x %02x\n",rgb>>8,rgb&0xff,(((d1 >> 4) & 0x03) - 2), (((d1 >> 2) & 0x03) - 2), (( d1       & 0x03) - 2),
                  PX_GET_RED(qli->px), PX_GET_GREEN(qli->px), PX_GET_BLUE(qli->px),
@@ -349,7 +358,7 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       r += R_FACTOR * (vg - 8 + ((d2 >> 4) & 0x0f));
       g += G_FACTOR * (vg);
       b += B_FACTOR * (vg - 8 +  (d2       & 0x0f));
-      qli_pixel_t rgb = RGB_PACK(r,g,b);
+      qli_pixel_t rgb = QLI_RGB_PACK(r,g,b);
       for(int i=0;i<QLI_BPP;i++) qli->px[i] = (rgb>>(8*(QLI_BPP-i-1)))&0xff;
       #if QLI_DEBUG != 0
       fprintf(stderr,"%02x%02x QLI_OP_LUMA %d\n",qli->px[0],qli->px[1],vg);
@@ -452,7 +461,7 @@ static int qli_factors(int X, struct qli_fs_track *glb)
  * RETURN: the number of bytes written to buf (or would be written to if supplied)
  *         or negative on error
  */
-int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height, uint8_t *buf, size_t bufsize)
+int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height, int stride, uint8_t *buf, size_t bufsize)
 {
   int i,res;
   struct qli_image img;
@@ -464,13 +473,14 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
   int run=0,end;
 
   if(rgb==NULL||width<=0||height<=0) return(-1);
-  if(0!=qli_init(&img, width, height, buf, bufsize)) return(-1);
+  if(0!=qli_init(&img, width, height, 0, buf, bufsize)) return(-1);
+  if(stride==0) stride = width*sizeof(uint32_t);
   end=width*height;
   if(NULL==buf) bufsize=width*height*(QLI_BPP+1);
   for(pos=opos=0;pos<end;pos++,ppx_prev=ppx)
   {
-    pix=rgb[pos];
-    ppx=RGB_PACK(RGB32_RED(pix), RGB32_GREEN(pix), RGB32_BLUE(pix));
+    pix=rgb[ (pos / width) * (stride/sizeof(uint32_t)) + (pos % width) ];
+    ppx=QLI_RGB_PACK(RGB32_RED(pix), RGB32_GREEN(pix), RGB32_BLUE(pix));
     for(i=0;i<QLI_BPP;i++) px[i] = (ppx>>(8*(QLI_BPP-i-1)))&0xff;
     if(ppx==ppx_prev && pos<end-1)
     {
@@ -608,7 +618,7 @@ int QLI_FUNC_NAME(qli_save, QLI_POSTFIX) (uint32_t *rgb, int width, int height, 
   
   if(rgb==NULL||width<=0||height<=0||NULL==file) return(-1);
   buf=calloc(1,width*height*QLI_BPP);
-  ret= QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (rgb, width, height, buf, width*height*QLI_BPP);
+  ret= QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (rgb, width, height, 0, buf, width*height*QLI_BPP);
   if(ret>0)
   {
     FILE *f=fopen(file,"wb");
