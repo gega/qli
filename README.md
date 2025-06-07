@@ -18,7 +18,7 @@ QLI is a lightweight, header-only lossless image codec based on [QOI](https://qo
 ## Basic API Usage
 
 ### Encoding to file
-
+_using  [rppm](https://github.com/gega/rppm) library_
 ```c
 #include "rppm.h"
 
