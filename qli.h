@@ -119,6 +119,7 @@ struct qli_image
   uint8_t index[QLI_BPP][1L<<QLI_INDEX_SIZE];
   uint8_t px[QLI_BPP];
   uint32_t run;
+  uint32_t pixels_left;
   QLI_USERDATA
 };
 
@@ -132,7 +133,8 @@ struct qli_image
 int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, uint32_t data_size);
 int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, uint32_t size);
 void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli);
-int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt);
+int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt, int *new_chunk);
+void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, uint32_t data_size);
 #endif
 
 #ifdef QLI_ENCODE
@@ -229,6 +231,7 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli)
     qli->run=0;
     qli->x=0;
     memset(qli->px,0,sizeof(qli->px));
+    qli->pixels_left=qli->width * qli->height;
   }
 }
 
@@ -268,17 +271,25 @@ int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t 
 
 #ifdef QLI_DECODE
 
+void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, uint32_t data_size)
+{
+  if(NULL==qli) return;
+  qli->data=data;
+  qli->size=data_size; // this should be even
+  qli->pos=0;
+}
+
 /* decoding pixel_cnt pixels to the supplied destination area
  *
  * RETURN: number of pixels extracted
  */
-int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt)
+int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt, int *new_chunk)
 {
   int ret=0;
   uint8_t d1;
   int i;
 
-  if(pixel_cnt == 0) return(0);
+  if(qli->pixels_left == 0) { printf("VEGE pixel_count=0\n"); return(0);}
   if(!qli || !dest) return(-1);
 
   while(pixel_cnt>0 && qli->pos<=qli->size)
@@ -348,7 +359,9 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
       qli->run=1+(d1&0x3f);
     }
   }
-  
+  qli->pixels_left-=ret;
+  if(qli->pos>=qli->size && new_chunk!=NULL && qli->pixels_left>0)  *new_chunk=1;
+
   return(ret);
 }
 
