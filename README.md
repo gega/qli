@@ -41,6 +41,7 @@ while( 0 < ( decoded_pixels = qli_decode(&qli, buffer, sizeof(buffer), &new_chun
   // Handle decoded_bytes of buffer
   if(new_chunk)
   {
+    new_chunk = 0;
     // fetch new set of data and update buffers:
     qli_new_chunk(&qli, new_data_ptr, new_data_size);
   }
