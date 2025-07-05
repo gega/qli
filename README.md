@@ -34,11 +34,16 @@ qli_save(img.pixels, img.width, img.height, "sample.qli");
 struct qli_image qli;
 uint8_t buffer[100];
 
-qli_init( &qli, width, height, width * QLI_BPP, data, data_size );
+qli_init( &qli, width, height, width * QLI_BPP, data, data_size ); // data_size can be smaller than the compressed image but must be even
 
-while( 0 < ( decoded_bytes = qli_decode(&qli, buffer, sizeof(buffer))))
+while( 0 < ( decoded_pixels = qli_decode(&qli, buffer, sizeof(buffer), &new_chunk)))
 {
   // Handle decoded_bytes of buffer
+  if(new_chunk)
+  {
+    // fetch new set of data and update buffers:
+    qli_new_chunk(&qli, new_data_ptr, new_data_size);
+  }
 }
 ```
 
