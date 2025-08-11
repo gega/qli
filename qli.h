@@ -102,24 +102,31 @@
 #define QLI_MAGIC2 'i'
 #define QLI_MAGIC3 '1'
 
+#define QLI_FLUSH (NULL)
+
 #if QLI_NOSTDIO == 0
 #include <stdio.h>
 #endif
 
+#define QLI_MAX_TOKEN_LEN (QLI_BPP+1)
+#define QLI_REMBUFSIZ (QLI_MAX_TOKEN_LEN*2-2)
+
 
 struct qli_image
 {
+  uint8_t *data;
+  int32_t pos;
+  uint32_t run;
+  int32_t pixels_left;
+  int32_t size;
   uint16_t width;
   uint16_t height;
   uint16_t stride;
-  uint32_t pos;
-  uint32_t size;
   uint16_t x;
-  uint8_t *data;
-  uint8_t index[QLI_BPP][1L<<QLI_INDEX_SIZE];
   uint8_t px[QLI_BPP];
-  uint32_t run;
-  uint32_t pixels_left;
+  int8_t remcnt;
+  uint8_t rem[QLI_REMBUFSIZ];
+  uint8_t index[QLI_BPP][1L<<QLI_INDEX_SIZE];
   QLI_USERDATA
 };
 
@@ -130,11 +137,12 @@ struct qli_image
 
 
 #ifdef QLI_DECODE
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, uint32_t data_size);
-int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, uint32_t size);
+int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, int32_t data_size);
+int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, int32_t size);
 void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli);
-int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt, int *new_chunk);
-void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, uint32_t data_size);
+int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, int32_t pixel_cnt, int *new_chunk);
+void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, int32_t data_size);
+int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (struct qli_image *qli, int *new_chunk);
 #endif
 
 #ifdef QLI_ENCODE
@@ -237,7 +245,7 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli)
 
 /* init user allocated qli struct
  */
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, uint32_t data_size)
+int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, int32_t data_size)
 {
   if(NULL==qli) return(-1);
   qli->width = width;
@@ -249,7 +257,7 @@ int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width,
   return(0);
 }
 
-int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, uint32_t size)
+int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, int32_t size)
 {
   if(NULL==qli||NULL==header) return(-1);
   if(   header[0]!=QLI_MAGIC0
@@ -271,98 +279,262 @@ int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t 
 
 #ifdef QLI_DECODE
 
-void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, uint32_t data_size)
+#ifndef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+
+struct cursor
+{
+  int32_t size;
+  int32_t pos;
+  uint8_t *data;
+};
+
+
+#define QLI_GETNEXTBYTE(qli) (crsr[mode].data[crsr[mode].pos++])
+
+
+void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, int32_t data_size)
 {
   if(NULL==qli) return;
   qli->data=data;
-  qli->size=data_size; // this should be even
+  qli->size=data_size;
   qli->pos=0;
+}
+
+/*
+ * return the next available byte for metadata processing
+ * because of input buffer handling, the leftover buffer may contain valid data, it is opaque for the caller so we provide a way
+ * to read the remaining data from the stream
+ *
+ * arguments:
+ *  qli       - context
+ *  new_chunk - request new chunk if needed
+ *  
+ * return:
+ *  error code:
+ *   positive: the byte read
+ *   negative: error code (not enough data in buffer or argument error)
+ */
+int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (struct qli_image *qli, int *new_chunk)
+{
+  int ret;
+
+  if(!qli) return(-1);
+  if(qli->remcnt==0)
+  {
+    if(qli->size>qli->pos)
+    {
+      ret=qli->data[qli->pos++];
+    }
+    else
+    {
+      if(new_chunk) *new_chunk=1;
+      ret=-1;
+    }
+  }
+  else
+  {
+    ret=qli->rem[0];
+    qli->remcnt--;
+    memmove(&qli->rem[0],&qli->rem[1],qli->remcnt);
+  }
+  
+  return(ret);
 }
 
 /* decoding pixel_cnt pixels to the supplied destination area
  *
  * RETURN: number of pixels extracted
  */
-int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, uint32_t pixel_cnt, int *new_chunk)
+int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, int32_t pixel_cnt, int *new_chunk)
 {
   int ret=0;
+  int flush=0;
   uint8_t d1;
   int i;
+  struct cursor crsr[2];
+  int mode;
+  int readover;
 
-  if(qli->pixels_left == 0) { printf("VEGE pixel_count=0\n"); return(0);}
-  if(!qli || !dest) return(-1);
-
-  while(pixel_cnt>0 && qli->pos<=qli->size)
+  if(!qli || !dest ) return(-1);
+  if(qli->pixels_left == 0) return(0);
+  if(qli->pixels_left < pixel_cnt) pixel_cnt=qli->pixels_left;
+  if(QLI_FLUSH == new_chunk)
   {
-    if(qli->run>0)
+    flush=1;
+    new_chunk=&flush;
+  }
+
+  if(qli->remcnt>0)
+  {
+    // HP leftover present, extend leftover to make sure we can process at least one token
+    for(i=0;i<MIN((QLI_MAX_TOKEN_LEN-1),qli->size);i++) qli->rem[qli->remcnt++]=qli->data[i];
+    crsr[0].size=qli->remcnt-(QLI_MAX_TOKEN_LEN-1);
+    crsr[0].pos=0;
+    crsr[0].data=qli->rem;
+    if(crsr[0].size<=0 && !flush)
     {
-      for(i=0;i<QLI_BPP;i++) *dest++ = qli->px[ABS(QLI_ENDIAN-i)];
-      qli->x++;
-      if(qli->x==qli->width)
+      // leftover is not large enough to guarantee at least one token processing
+      // and main data is not enough to fill the gap --> request new chunk
+      // this case should not happen only at the end of file when the FLUSH is not
+      // set but it should be set. this case issue a warning and indirectly set 
+      // the flush
+      flush=1;
+    }
+    // else: this should be possible at the end of the stream, 
+    //       let's process the leftover and hope that it is valid
+  }
+  else
+  {
+    // no leftover, skip it
+    // first call, or rare case when longest token appears at
+    // [size-QLI_MAX_TOKEN_LEN] position
+    crsr[0].size=0;
+    crsr[0].pos=crsr[0].size;
+  }
+  // main data setup
+  crsr[1].size=qli->size;
+  crsr[1].pos=qli->pos;
+  crsr[1].data=qli->data;
+  if(crsr[1].size>(QLI_MAX_TOKEN_LEN-1))
+  {
+    // HP we have enough data in main data, reduce it to make sure we can process
+    // a valid token near to the end of the buffer, that remainder data will
+    // end up in the leftover buffer for the next call
+    if(!flush) crsr[1].size-=QLI_MAX_TOKEN_LEN-1;
+  }
+  else
+  {
+    // main data is too short to reduce it for safe processing
+    if(crsr[0].size>0)
+    {
+      // will be leftover processing
+      // skip main data processing altogether, that will be the leftover for the next
+      // call, ensure it with faking the readover calculation to give us the proper 
+      // length
+      crsr[1].pos=crsr[1].size; // this will give a zero readover for label Leftover:
+      flush=1;
+    }
+    else
+    {
+      // no leftover processing
+      if(!flush)
       {
-        qli->x=0;
-        if(0!=qli->stride) dest+=qli->stride-(qli->width*QLI_BPP);
+        // no leftover, no flush
+        // copy all the remaining data to leftover and request a new chunk, shortcut
+        memcpy(qli->rem, &qli->data[qli->pos], qli->size);
+        qli->remcnt=qli->size;
+        qli->pos=qli->size+1;
+        *new_chunk=1;
+        return(0);
       }
-      ret++;
-      --pixel_cnt;
-      --qli->run;
-      continue;
-    }
-
-    if(qli->pos==qli->size) break;
-
-    d1 = qli->data[qli->pos++];
-    uint8_t cm = d1&QLI_CMD_MASK;
-
-    if (QLI_OP_RGB == d1)
-    {
-      for(i=0;i<QLI_BPP;i++) qli->px[i] = qli->data[qli->pos++];
-      QLI_UPDATE_INDEX(qli, qli->px);
-      qli->run=1;
-    }
-    else if(QLI_OP_INDEX == cm)
-    {
-      d1&=(1L<<QLI_INDEX_SIZE)-1;
-      for(int i=0;i<QLI_BPP;i++) qli->px[i] = qli->index[i][d1];
-      qli->run=1;
-    }
-    else if(QLI_OP_DIFF == cm)
-    {
-      int r = QLI_PX_GET_RED(qli->px);
-      int g = QLI_PX_GET_GREEN(qli->px);
-      int b = QLI_PX_GET_BLUE(qli->px);
-      r += QLI_R_FACTOR * (((d1 >> 4) & 0x03) - 2);
-      g += QLI_G_FACTOR * (((d1 >> 2) & 0x03) - 2);
-      b += QLI_B_FACTOR * (( d1       & 0x03) - 2);
-      qli_pixel_t rgb = QLI_RGB_PACK(r,g,b);
-      for(int i=0;i<QLI_BPP;i++) qli->px[i] = (rgb>>(8*(QLI_BPP-i-1)))&0xff;
-      QLI_UPDATE_INDEX(qli, qli->px);
-      qli->run=1;
-    }
-    else if(QLI_OP_LUMA == cm)
-    {
-      int r = QLI_PX_GET_RED(qli->px);
-      int g = QLI_PX_GET_GREEN(qli->px);
-      int b = QLI_PX_GET_BLUE(qli->px);
-      int d2 = qli->data[qli->pos++];
-      int vg = (d1 & 0x3f) - 32;
-      r += QLI_R_FACTOR * (vg - 8 + ((d2 >> 4) & 0x0f));
-      g += QLI_G_FACTOR * (vg);
-      b += QLI_B_FACTOR * (vg - 8 +  (d2       & 0x0f));
-      qli_pixel_t rgb = QLI_RGB_PACK(r,g,b);
-      for(int i=0;i<QLI_BPP;i++) qli->px[i] = (rgb>>(8*(QLI_BPP-i-1)))&0xff;
-      QLI_UPDATE_INDEX(qli, qli->px);
-      qli->run=1;
-    }
-    else if(QLI_OP_RUN == cm)
-    {
-      qli->run=1+(d1&0x3f);
     }
   }
-  qli->pixels_left-=ret;
-  if(qli->pos>=qli->size && new_chunk!=NULL && qli->pixels_left>0)  *new_chunk=1;
+#ifndef CR // inner loop BEGIN -------------------------------------------------------------------------
+#define CR crsr[mode]
+#endif
+  for(readover=mode=0;mode<=1;mode++)
+  {
+    CR.pos+=readover;
+    while( pixel_cnt>0 && (qli->run>0 || CR.pos<CR.size) )
+    {
+      if(qli->run>0)
+      {
+        for(i=0;i<QLI_BPP;i++) *dest++ = qli->px[ABS(QLI_ENDIAN-i)];
+        if(++qli->x==qli->width)
+        {
+          qli->x=0;
+          if(0!=qli->stride) dest+=qli->stride-(qli->width*QLI_BPP);
+        }
+        ret++;
+        --pixel_cnt;
+        --qli->run;
+        continue; /* shortcut for RUN */
+      }
 
+      d1 = QLI_GETNEXTBYTE(qli);
+      uint8_t cm = d1 & QLI_CMD_MASK;
+
+      if (QLI_OP_RGB == d1)
+      {
+        for(i=0;i<QLI_BPP;i++)
+        {
+          qli->px[i] = QLI_GETNEXTBYTE(qli);
+        }
+        QLI_UPDATE_INDEX(qli, qli->px);
+        qli->run=1;
+      }
+      else if(QLI_OP_INDEX == cm)
+      {
+        d1&=(1L<<QLI_INDEX_SIZE)-1;
+        for(i=0;i<QLI_BPP;i++) qli->px[i] = qli->index[i][d1];
+        qli->run=1;
+      }
+      else if(QLI_OP_DIFF == cm)
+      {
+        int r = QLI_PX_GET_RED(qli->px);
+        int g = QLI_PX_GET_GREEN(qli->px);
+        int b = QLI_PX_GET_BLUE(qli->px);
+        r += QLI_R_FACTOR * (((d1 >> 4) & 0x03) - 2);
+        g += QLI_G_FACTOR * (((d1 >> 2) & 0x03) - 2);
+        b += QLI_B_FACTOR * (( d1       & 0x03) - 2);
+        qli_pixel_t rgb = QLI_RGB_PACK(r,g,b);
+        for(int i=0;i<QLI_BPP;i++) qli->px[i] = (rgb>>(8*(QLI_BPP-i-1)))&0xff;
+        QLI_UPDATE_INDEX(qli, qli->px);
+        qli->run=1;
+      }
+      else if(QLI_OP_LUMA == cm)
+      {
+        int r = QLI_PX_GET_RED(qli->px);
+        int g = QLI_PX_GET_GREEN(qli->px);
+        int b = QLI_PX_GET_BLUE(qli->px);
+        int d2 = QLI_GETNEXTBYTE(qli);
+        int vg = (d1 & 0x3f) - 32;
+        r += QLI_R_FACTOR * (vg - 8 + ((d2 >> 4) & 0x0f));
+        g += QLI_G_FACTOR * (vg);
+        b += QLI_B_FACTOR * (vg - 8 +  (d2       & 0x0f));
+        qli_pixel_t rgb = QLI_RGB_PACK(r,g,b);
+        for(int i=0;i<QLI_BPP;i++) qli->px[i] = (rgb>>(8*(QLI_BPP-i-1)))&0xff;
+        QLI_UPDATE_INDEX(qli, qli->px);
+        qli->run=1;
+      }
+      else if(QLI_OP_RUN == cm)
+      {
+        qli->run=1+(d1&0x3f);
+      }
+    }
+    // calculate readover
+    // for leftover processing, this will eats up the beginning of the main data
+    // for main data readover, this will reduces the amount of data goes to 
+    // leftover for future calls
+    readover=( CR.pos<=CR.size ? 0 : (CR.pos-CR.size));
+  }
+#undef CR // inner loop END ----------------------------------------------------------------------------
+  qli->pixels_left-=ret;
+  if(crsr[0].size>0)
+  {
+    // if leftover was processed but not consumed fully, preserve the remaining part for further reading
+    if(crsr[0].size-crsr[0].pos>0) memmove(&qli->rem[0],&qli->rem[crsr[0].pos],crsr[0].size-crsr[0].pos);
+    qli->remcnt=(crsr[0].size-crsr[0].pos<0 ? 0 : crsr[0].size-crsr[0].pos);
+  }
+  if(!flush)
+  {
+Leftover:
+    // HP no flush
+    if(crsr[1].pos>=crsr[1].size && qli->pixels_left>0) *new_chunk=1;
+    qli->pos=crsr[1].pos;
+    if(*new_chunk)
+    {
+      qli->remcnt=qli->size-qli->pos;
+      if(qli->remcnt>0) memcpy(qli->rem, &qli->data[qli->pos], qli->remcnt);
+    }
+  }
+  
   return(ret);
+
+  // never reached, prevent warning
+  goto Leftover;
 }
 
 #endif
