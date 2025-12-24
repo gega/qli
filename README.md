@@ -66,11 +66,13 @@ qli_init_header(&qli, header, file_size);
 
 Define these macros **before** including `qli.h` to tailor the library to your needs:
 
-| Macro                | Description                                                            |
-| -------------------- | ---------------------------------------------------------------------- |
-| `QLI_NOSTDIO`        | Exclude all file I/O functionality (`qli_save`, `qli_init_header`)     |
-| `QLI_PIXEL_FORMAT`   | Sets the default pixel format (e.g., `QLI_RGB565`)                     |
-| `QLI_USERDATA`       | Enables `void *userdata` field in the `qli_state` struct               |
-| `QLI_POSTFIX`        | Appends a custom postfix to all symbol names (for namespacing)         |
-| `QLI_ENDIAN`         | Overrides platform endianness: `0 = little`, `1 = big`                 |
-| `QLI_INDEX_SIZE`     | Sets the size of the index array (values: `16`, `32`, `64`, etc.)      |
+| Macro                | Description                                                                       |
+| -------------------- | --------------------------------------------------------------------------------- |
+| `QLI_NOSTDIO`        | Exclude all file I/O functionality (`qli_save`, `qli_init_header`)                |
+| `QLI_PIXEL_FORMAT`   | Sets the default pixel format (`QLI_PF_RGB565`, `QLI_PF_RGB444`, `QLI_PF_RGB888`) |
+| `QLI_USERDATA`       | Add extra fields in the `qli_image` struct                                        |
+| `QLI_POSTFIX`        | Appends a custom postfix to all symbol names (for namespacing)                    |
+| `QLI_ENDIAN`         | Overrides platform endianness (`QLI_LITTLE_ENDIAN`, `QLI_LITTLE_ENDIAN`)          |
+| `QLI_INDEX_SIZE`     | Sets the size of the index array (values: `16`, `32`, `64`, etc.)                 |
+| `QLI_STRIDE`         | Define as 1 to enable stride support                                              |
+| `QLI_DEBUG`          | Define as 1 to enable printing out the encoded/decoded opcodes                    |
