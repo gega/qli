@@ -2,7 +2,7 @@
 QLI is Quite Light Image format inspired by QOI
 
 QLI is a lightweight, header-only lossless image codec based on [QOI](https://qoiformat.org/), extended for embedded and low memory use cases. It is designed to be portable, customizable, and friendly for both file-based and memory-based image workflows. The decoder is aimed to be used in embedded environment while the encoder is more relaxed, designed for desktop use.
-Pixel formats are for both encoding and decoding - the same configuration needed for both encoding and decoding. If multiple configurations needed, use the `QLI_POSTFIX` to define multiple decoders/encoders without name collision. Pixel formats are defining the format of the output buffers, in case of RGB444 the output buffer contains two pixels in every three bytes so the output buffer should be divisible by three and the emitted number of pixels are always even. Similarly for other formats, the buffer needs to be divisible by the pixel width to accomodate whole pixels.
+Pixel formats are for both encoding and decoding - the same configuration needed for both encoding and decoding. If multiple configurations needed, use the `QLI_POSTFIX` to define multiple decoders/encoders without name collision. Pixel formats are defining the format of the output buffers, in case of `RGB444` the output buffer contains two pixels in every three bytes so the output buffer should be divisible by three and the emitted number of pixels are always even. Similarly for other formats, the buffer needs to be divisible by the pixel width to accomodate whole pixels.
 
 ## Hightlights
 
