@@ -8,7 +8,7 @@ QLI is a lightweight, header-only lossless image codec based on [QOI](https://qo
 * Streaming support
 * Static configuration
 * Alpha channel removed
-* Multiple pixel formats (`RGBA`, `RGB565`, etc.)
+* Multiple pixel formats (`RGB888`, `RGB565`, `RGB444`)
 * Big- and little-endian support
 * Optional stride handling
 * Customizable index size
