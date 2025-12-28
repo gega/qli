@@ -36,9 +36,9 @@ struct qli_image qli;
 uint8_t buffer[100];
 
 // NOTE: in case you disabled stride handling, omit that argument
-qli_init( &qli, width, height, width * QLI_BPP, data, data_size ); // data_size can be smaller than the compressed image but must be even
+qli_init( &qli, width, height, data, data_size, 0 ); // data_size can be smaller than the compressed image but must be even
 
-while( 0 < ( decoded_pixels = qli_decode(&qli, buffer, sizeof(buffer), &new_chunk)))
+while( 0 < ( decoded_bytes = qli_decode(&qli, buffer, sizeof(buffer), &new_chunk)))
 {
   // Handle decoded_bytes of buffer
   if(new_chunk)
