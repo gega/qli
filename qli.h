@@ -1,5 +1,4 @@
-/*
- * Copyright 2025 Gergely Gati
+/* Copyright 2025 Gergely Gati
  *
  * gati.gergely@yahoo.com
  * github.com/gega
@@ -83,12 +82,18 @@
 #if QLI_PIXEL_FORMAT == QLI_PF_RGB565
  #define QLI_BPP (2)
  #define QLI_BPP2 (4)
+ #define QLI_BYTE_TO_PIXEL(b) ((b)/2)
+ #define QLI_PIXEL_TO_BYTE(p) ((p)*2)
 #elif QLI_PIXEL_FORMAT == QLI_PF_RGB888
  #define QLI_BPP (3)
  #define QLI_BPP2 (6)
+ #define QLI_BYTE_TO_PIXEL(b) ((b)/3)
+ #define QLI_PIXEL_TO_BYTE(p) ((p)*3)
 #elif QLI_PIXEL_FORMAT == QLI_PF_RGB444
  #define QLI_BPP (0)
  #define QLI_BPP2 (3)
+ #define QLI_BYTE_TO_PIXEL(b) (((b)*2)/3)
+ #define QLI_PIXEL_TO_BYTE(p) ((((p)*3)+1)/2)
 #else
  #error "Unsupported pixel format"
 #endif
@@ -145,7 +150,7 @@ struct qli_image
   uint8_t *data;
   int32_t pos;
   uint32_t run;
-  int32_t pixels_left;
+  int32_t bytes_left;
   int32_t size;
   uint16_t width;
   uint16_t height;
@@ -177,14 +182,10 @@ struct qli_image
 
 
 #ifdef QLI_DECODE
-#if QLI_STRIDE == 1
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, int32_t data_size);
-#else
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint8_t *data, int32_t data_size);
-#endif
+int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint8_t *data, int32_t data_size, uint16_t stride);
 int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (struct qli_image *qli, uint8_t *header, int32_t size);
 void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli);
-int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, int32_t pixel_cnt, int *new_chunk);
+int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, int32_t byte_cnt, int *new_chunk);
 void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (struct qli_image *qli, uint8_t *data, int32_t data_size);
 int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (struct qli_image *qli, int *new_chunk);
 #endif
@@ -314,17 +315,13 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (struct qli_image *qli)
     qli->x=0;
 #endif
     memset(&qli->px,0,sizeof(qli->px));
-    qli->pixels_left=qli->width * qli->height;
+    qli->bytes_left=QLI_PIXEL_TO_BYTE(qli->width * qli->height);
   }
 }
 
 /* init user allocated qli struct
  */
-#if QLI_STRIDE == 1
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint16_t stride, uint8_t *data, int32_t data_size)
-#else
-int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint8_t *data, int32_t data_size)
-#endif
+int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (struct qli_image *qli, uint16_t width, uint16_t height, uint8_t *data, int32_t data_size, uint16_t stride)
 {
   if(NULL==qli) return(-1);
   memset(qli,0,sizeof(struct qli_image));
@@ -427,11 +424,11 @@ int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (struct qli_image *qli, int *n
   return(ret);
 }
 
-/* decoding pixel_cnt pixels to the supplied destination area
+/* decoding bytes_cnt bytes to the supplied destination area
  *
- * RETURN: number of pixels extracted
+ * RETURN: number of bytes extracted
  */
-int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, int32_t pixel_cnt, int *new_chunk)
+int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest, int32_t bytes_cnt, int *new_chunk)
 {
   int ret=0;
   int flush=0;
@@ -442,8 +439,8 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
   int readover;
 
   if(!qli || !dest ) return(-1);
-  if(qli->pixels_left == 0) return(0);
-  if(qli->pixels_left < pixel_cnt) pixel_cnt=qli->pixels_left;
+  if(qli->bytes_left == 0) return(0);
+  if(qli->bytes_left < bytes_cnt) bytes_cnt=qli->bytes_left;
   if(QLI_FLUSH == new_chunk)
   {
     flush=1;
@@ -521,7 +518,7 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
   for(readover=mode=0;mode<=1;mode++)
   {
     CR.pos+=readover;
-    while( pixel_cnt>0 && (qli->run>0 || CR.pos<CR.size) )
+    while( bytes_cnt>0 && (qli->run>0 || CR.pos<CR.size) )
     {
       if(qli->run>0)
       {
@@ -543,9 +540,9 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
           *dest++ = qli->dest2[0];
           *dest++ = qli->dest2[1];
           *dest++ = qli->dest2[2];
+          bytes_cnt-=3;
+          ret+=3;
           qli->dest2fill=0;
-          ret+=2;
-          pixel_cnt-=2;
           --qli->run;
         }
 #else
@@ -557,8 +554,8 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
           if(0!=qli->stride) dest+=qli->stride-(qli->width*QLI_BPP);
         }
 #endif
-        ret++;
-        --pixel_cnt;
+        ret+=QLI_BPP;
+        bytes_cnt-=QLI_BPP;
         --qli->run;
 #endif
         continue; /* shortcut for RUN */
@@ -651,7 +648,8 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
     readover=( CR.pos<=CR.size ? 0 : (CR.pos-CR.size));
   }
 #undef CR // inner loop END ----------------------------------------------------------------------------
-  qli->pixels_left-=ret;
+
+  qli->bytes_left-=ret;
   if(crsr[0].size>0)
   {
     // if leftover was processed but not consumed fully, preserve the remaining part for further reading
@@ -662,7 +660,7 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (struct qli_image *qli, uint8_t *dest
   {
 Leftover:
     // HP no flush
-    if(crsr[1].pos>=crsr[1].size && qli->pixels_left>0) *new_chunk=1;
+    if(crsr[1].pos>=crsr[1].size && qli->bytes_left>0) *new_chunk=1;
     qli->pos=crsr[1].pos;
     if(*new_chunk)
     {
@@ -713,11 +711,7 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
   int run=0,end;
 
   if(rgb==NULL||width<=0||height<=0) return(-1);
-#if QLI_STRIDE == 1
-  if(0!=qli_init(&img, width, height, 0, buf, bufsize)) return(-1);
-#else
-  if(0!=qli_init(&img, width, height, buf, bufsize)) return(-1);
-#endif
+  if(0!=qli_init(&img, width, height, buf, bufsize, 0)) return(-1);
   if(stride==0) stride = width*sizeof(uint32_t);
   end=width*height;
   if(NULL==buf) bufsize=width*height*((((QLI_BPP2)+1)/2)+1);
