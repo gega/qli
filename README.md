@@ -11,7 +11,6 @@ Pixel formats are for both encoding and decoding - the same configuration needed
 * Alpha channel removed
 * Multiple pixel formats (`RGB888`, `RGB565`, `RGB444`)
 * Big- and little-endian support
-* Optional stride handling
 * Customizable index size
 * No dynamic allocation or stdio if not needed
 * Streamed decoding for low memory usage
@@ -32,20 +31,21 @@ qli_save(img.pixels, img.width, img.height, "sample.qli");
 
 ```c
 
-struct qli_image qli;
+qli_image_t qli;
 uint8_t buffer[100];
 
-// NOTE: in case you disabled stride handling, omit that argument
-qli_init( &qli, width, height, data, data_size, 0 ); // data_size can be smaller than the compressed image but must be even
+// data_size can be smaller than the compressed image but must be larger or equal than 3 bytes except at the end
+qli_init( &qli, width, height, data, data_size, 0 );
 
-while( 0 < ( decoded_bytes = qli_decode(&qli, buffer, sizeof(buffer), &new_chunk)))
+int bytes_written;
+while ( 0 < qli_decode(&qli, buffer, MIN( sizeof(buffer), remaining_bytes ), &new_chunk, &bytes_written))
 {
-  // Handle decoded_bytes of buffer
-  if(new_chunk)
+  // Handle bytes_written of buffer
+  if ((new_chunk & QLI_RF_END_OF_STREAM) != 0) break;
+  if ((new_chunk & QLI_RF_MORE_DATA) != 0)
   {
-    new_chunk = 0;
     // fetch new set of data and update buffers:
-    qli_new_chunk(&qli, new_data_ptr, new_data_size);
+    qli_new_chunk(&qli, new_data_ptr, new_data_size, is_last_chunk);
   }
 }
 ```
@@ -53,11 +53,11 @@ while( 0 < ( decoded_bytes = qli_decode(&qli, buffer, sizeof(buffer), &new_chunk
 ### Decoding from file
 
 ```c
-struct qli_image qli;
+qli_image_t qli;
 uint8_t header[QLI_HEADER_LEN];
 
 fread(header, 1, QLI_HEADER_LEN, fp);
-qli_init_header(&qli, header, file_size);
+qli_init_header(&qli, header, 0);
 
 // Use the same decoding loop as above
 ```
@@ -74,7 +74,7 @@ Define these macros **before** including `qli.h` to tailor the library to your n
 | `QLI_PIXEL_FORMAT`   | Sets the default pixel format (`QLI_PF_RGB565`, `QLI_PF_RGB444`, `QLI_PF_RGB888`) |
 | `QLI_USERDATA`       | Add extra fields in the `qli_image` struct                                        |
 | `QLI_POSTFIX`        | Appends a custom postfix to all symbol names (for namespacing)                    |
-| `QLI_ENDIAN`         | Overrides platform endianness (`QLI_LITTLE_ENDIAN`, `QLI_LITTLE_ENDIAN`)          |
-| `QLI_INDEX_SIZE`     | Sets the size of the index array (values: `16`, `32`, `64`, etc.)                 |
+| `QLI_ENDIAN`         | Set output endianness (`QLI_LITTLE_ENDIAN`, `QLI_LITTLE_ENDIAN`)                  |
+| `QLI_INDEX_SIZE`     | Sets the bit width of the index array (values: `6`, `5`, `4`, etc.)               |
 | `QLI_STRIDE`         | Define as 1 to enable stride support                                              |
-| `QLI_DEBUG`          | Define as 1 to enable printing out the encoded/decoded opcodes                    |
+| `QLI_DEBUG`          | Define as 1 or 2 to enable printing out the encoded/decoded opcodes and more      |
