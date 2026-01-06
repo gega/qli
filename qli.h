@@ -439,6 +439,7 @@ struct QLI_STRUCT_NAME(qli_image, QLI_POSTFIX)
   uint8_t rem[QLI_REMBUFSIZ];
   qli_pixel_t index[1L<<QLI_INDEX_SIZE];
   int last_chunk;
+  QLI_USERDATA;
 };
 
 
