@@ -6,11 +6,10 @@ Pixel formats are for both encoding and decoding - the same configuration needed
 
 ## Hightlights
 
-* Streaming support
+* Fast streaming support
 * Static configuration
-* Alpha channel removed
 * Multiple pixel formats (`RGB888`, `RGB565`, `RGB444`)
-* Big- and little-endian support
+* Big- and little-endian output support
 * Customizable index size
 * No dynamic allocation or stdio if not needed
 * Streamed decoding for low memory usage
