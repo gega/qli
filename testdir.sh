@@ -15,7 +15,6 @@ fi
 echo "DIR: $ROOT_DIR"
 echo "MODES: ${MODES[*]}"
 
-# Use -print0 to avoid exploding on spaces, tabs, or human creativity
 find "$ROOT_DIR" -size -512k -type f \( -iname "*.ppm" \) -print0 |
 while IFS= read -r -d '' PPM; do
   STUB=$(dirname "$PPM")/$(basename "$PPM" .ppm)
