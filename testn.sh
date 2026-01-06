@@ -56,7 +56,7 @@ for OUT_BUF in "${OUT_BUF_SIZES[@]}"; do
 
     if ! run_test "$OUT_BUF" "$CHUNK"; then
       echo -e "\tFAIL"
-      echo "    Failure at out_buf=${OUT_BUF}, chunk=${CHUNK}"
+      echo " *** out_buf=${OUT_BUF}, chunk=${CHUNK}"
       exit 1
     fi
 
