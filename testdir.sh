@@ -21,9 +21,7 @@ while IFS= read -r -d '' PPM; do
   for MODE in "${MODES[@]}"; do
     if ! "$TEST_SCRIPT" "$MODE" "$STUB"; then
       echo
-      echo "FAILURE detected"
-      echo "File: $PPM"
-      echo "Mode: $MODE"
+      echo "FAIL: $MODE $PPM"
       exit 1
     fi
   done
