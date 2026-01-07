@@ -5,6 +5,6 @@ if [ ! -e codec-corpus/ ]; then
 fi
 
 find codec-corpus/ -name "*.ppm" -delete
-find codec-corpus/ -name "*.[pj][np][g]" -exec magick {} {}.ppm \;
+find codec-corpus/ -name "*.[pj][np][g]" -exec magick {} -depth 8  {}.ppm \;
 
 ./testdir.sh codec-corpus/

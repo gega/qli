@@ -45,7 +45,7 @@ run_test() {
 }
 
 OUT_BUF_SIZES=(3 7 16 64 255 2048)
-CHUNK_SIZES=(3 7 16 31 64 128 512)
+CHUNK_SIZES=(1 3 7 16 31 64 128 512)
 
 $Q e "$PPM" "$QLI" 2>"$ELOG1" || return 1
 

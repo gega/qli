@@ -196,7 +196,7 @@
   #define TRACE_HDR(qli) do { \
       int pf = QLI_PIXEL_FORMAT; \
       fprintf(stderr,"%dx%d\n",qli->width,qli->height); \
-      fprintf(stderr,"type,\tno,\t size,\t pos,\trun,\tbytes_left,\tpixels_left,\tremcnt,\t    rem,\t  px,\t"); \
+      fprintf(stderr,"type,\tno,\t size,\t pos,\trun,\tpixels_left,\tremcnt,\t    rem,\t  px,\t"); \
       if(pf==QLI_PF_RGB444) fprintf(stderr,"dest2fill,\tdest2,\t"); \
       fprintf(stderr,"emitted,\tnewchunk\n"); \
     } while(0)
@@ -204,7 +204,7 @@
   #define TRACE_QLI(qli, end, byte_cnt, new_chunk, emitted, ret) do { \
       if(!end) fprintf(stderr,"\nD-IN,\t%2d,\t",++debug_decode_cnt); \
       else fprintf(stderr,"D-%d,\t%2d,\t",ret,debug_decode_cnt); \
-      fprintf(stderr,"%5d,\t%5d,\t%2d,\t%8d,\t%8d,\t%5d,\t",qli->size,qli->pos,qli->run,qli->bytes_left,qli->pixels_left,qli->remcnt); \
+      fprintf(stderr,"%5d,\t%5d,\t%2d,\t%8d,\t%5d,\t",qli->size,qli->pos,qli->run,qli->pixels_left,qli->remcnt); \
       for(int i=0;i<QLI_REMBUFSIZ;i++) fprintf(stderr,"%02x",qli->rem[i]); \
       fprintf(stderr,",\t"); \
       fprintf(stderr,"%04x,\t%8d,\t",qli->px,qli->dest2fill); \
@@ -221,7 +221,7 @@
   #define TRACE_QLI(qli, end, byte_cnt, new_chunk, emitted, ret) do { \
       if(!end) fprintf(stderr,"\nD-IN,\t%2d,\t",++debug_decode_cnt); \
       else fprintf(stderr,"D-%d,\t%2d,\t",ret,debug_decode_cnt); \
-      fprintf(stderr,"%5d,\t%5d,\t%2d,\t%8d,\t%8d,\t%5d,\t",qli->size,qli->pos,qli->run,qli->bytes_left,qli->pixels_left,qli->remcnt); \
+      fprintf(stderr,"%5d,\t%5d,\t%2d,\t%8d,\t%5d,\t",qli->size,qli->pos,qli->run,qli->pixels_left,qli->remcnt); \
       for(int i=0;i<QLI_REMBUFSIZ;i++) fprintf(stderr,"%02x",qli->rem[i]); \
       fprintf(stderr,",\t"); \
       fprintf(stderr,"%x",qli->px); \
@@ -249,7 +249,7 @@ int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *ql
 int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *header, uint16_t stride);
 void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli);
 int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *dest, int32_t byte_cnt, int *new_chunk, int *emitted);
-void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *data, int32_t data_size, int last_chunk);
+void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *data, int32_t data_size);
 int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, int *new_chunk);
 #endif
 
@@ -422,7 +422,6 @@ struct QLI_STRUCT_NAME(qli_image, QLI_POSTFIX)
   int32_t size;
   int32_t pos;
   uint32_t run;
-  int32_t bytes_left;
   int32_t pixels_left;
   uint16_t width;
   uint16_t height;
@@ -438,7 +437,6 @@ struct QLI_STRUCT_NAME(qli_image, QLI_POSTFIX)
   int8_t remcnt;
   uint8_t rem[QLI_REMBUFSIZ];
   qli_pixel_t index[1L<<QLI_INDEX_SIZE];
-  int last_chunk;
   QLI_USERDATA;
 };
 
@@ -467,11 +465,10 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) 
     qli->x=0;
 #endif
     memset(&qli->px,0,sizeof(qli->px));
-    qli->bytes_left=QLI_PIXEL_TO_BYTE(qli->width * qli->height);
   }
 }
 
-void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) ( QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *data, int32_t data_size, int last_chunk)
+void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) ( QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *data, int32_t data_size)
 {
   if(NULL==qli) return;
   qli->data=data;
@@ -482,7 +479,6 @@ void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) ( QLI_TYPE(qli_image_t, QLI_POSTF
   fprintf(stderr,"]\n");
 #endif
   qli->pos=0;
-  qli->last_chunk=last_chunk;
 }
 
 /* init user allocated qli struct
@@ -499,7 +495,7 @@ int QLI_FUNC_NAME(qli_init, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *ql
 #endif
   DBG_PRINT(2,"init: size=%d\n",size);
   QLI_FUNC_NAME(qli_rewind,QLI_POSTFIX) (qli);
-  QLI_FUNC_NAME(qli_new_chunk,QLI_POSTFIX) (qli, data, size, 0);
+  QLI_FUNC_NAME(qli_new_chunk,QLI_POSTFIX) (qli, data, size);
   TRACE_HDR(qli);
   return(0);
 }
@@ -517,7 +513,7 @@ int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTF
   if( QLI_TYPE(qli_index_code, QLI_POSTFIX) [QLI_INDEX_SIZE]!=((flags)&3)) return(-1);
   QLI_FUNC_NAME(qli_init,QLI_POSTFIX) (qli, header[0]<<8|header[1], header[2]<<8|header[3], NULL, 0, stride);
   QLI_FUNC_NAME(qli_rewind,QLI_POSTFIX) (qli);
-  QLI_FUNC_NAME(qli_new_chunk,QLI_POSTFIX) (qli, NULL, 0, 0);
+  QLI_FUNC_NAME(qli_new_chunk,QLI_POSTFIX) (qli, NULL, 0);
   return(0);
 }
 
@@ -676,9 +672,14 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *
     {
       // rem has not enugh data for this opcode, ask for more data
       // and move the rem back and restore the opcode
-      memmove(&qli->rem[1],&qli->rem[0],qli->remcnt);
+      TRACE("remB");
+      DBG_PRINT(2,"to rem[1] %d bytes from rem\n", qli->remcnt);
+      memmove(&qli->rem[1], &qli->rem[0], qli->remcnt);
       qli->remcnt++;
       qli->rem[0]=d1;
+      memcpy(&qli->rem[qli->remcnt], qli->data, (qli->size-qli->pos));
+      qli->remcnt+=(qli->size-qli->pos);
+      DBG_PRINT(2,"to rem[%d] %d bytes from data\n", qli->remcnt, (qli->size-qli->pos));
       *new_chunk|=QLI_RF_MORE_DATA;
       TRACE_SUM();
       TRACE_QLI(qli, 1, bytes_cnt, *new_chunk, *emitted, 0);
@@ -724,7 +725,6 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *
       return(qli->pos - pos_1);
     }
     if(qli->size - qli->pos < QLI_MAX_TOKEN_LEN || qli->pixels_left <= 0) break;
-    fprintf(stderr,"femP + qli->size=%d qli->pos=%d QLI_MAX_TOKEN_LEN=%d\n",qli->size,qli->pos,QLI_MAX_TOKEN_LEN);
     d1 = QLI_NEXTBYTE(qli, new_chunk);
     QLI_OP_PROC(qli, d1, new_chunk);
   }
@@ -753,7 +753,6 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *
       // including opcode to rem buffer and ask for more data
       qli->rem[0]=d1;
       memcpy(&qli->rem[1], &qli->data[qli->pos], MIN((qli->size - qli->pos), (sizeof(qli->rem)-1) ));
-      fprintf(stderr,"d1=%x\n",d1);
       qli->remcnt = MIN(1 + qli->size - qli->pos, sizeof(qli->rem));
       *new_chunk|=QLI_RF_MORE_DATA;
       TRACE_SUM();
@@ -993,5 +992,6 @@ int QLI_FUNC_NAME(qli_save, QLI_POSTFIX) (uint32_t *rgb, int width, int height, 
 #undef QLI_PIXEL_TO_BYTE
 #undef QLI_MIN_OUTPUT_BUFFER_SIZE
 #undef qli_pixel_t
+#undef TRACE_QLI
 
 #endif

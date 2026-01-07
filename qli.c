@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define QLI_DEBUG 1
+#define QLI_DEBUG 0
 #define QLI_PIXEL_FORMAT QLI_PF_RGB444
 #define QLI_ENDIAN QLI_BIG_ENDIAN
 #define QLI_POSTFIX _q4
@@ -162,12 +162,7 @@ int main(int argc, char **argv)
 						size -= MIN(chunk, size);
 						qli_new_chunk_q4(&q4, d,
 								 MIN(chunk,
-								     size),
-								 (MIN
-								  (chunk,
-								   size) ==
-								  chunk ? 0 :
-								  1));
+								     size));
 					}
 					new_chunk = 0;
 				}
@@ -195,9 +190,7 @@ int main(int argc, char **argv)
 						d += chunk;
 						size -= currchunk;
 						qli_new_chunk_q5(&q5, d,
-								 currchunk,
-								 currchunk ==
-								 chunk ? 0 : 1);
+								 currchunk);
 					}
 					new_chunk = 0;
 				}
@@ -227,10 +220,7 @@ int main(int argc, char **argv)
 						d += chunk;
 						size -= currchunk;
 						qli_new_chunk_q8(&q8, d,
-								 currchunk,
-								 (currchunk ==
-								  chunk ? 0 :
-								  1));
+								 currchunk);
 					}
 					new_chunk = 0;
 				}
