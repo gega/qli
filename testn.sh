@@ -52,7 +52,7 @@ $Q e "$PPM" "$QLI" 2>"$ELOG1" || return 1
 for OUT_BUF in "${OUT_BUF_SIZES[@]}"; do
   for CHUNK in "${CHUNK_SIZES[@]}"; do
 
-    (( OUT_BUF < 3 || CHUNK < 3 )) && continue
+    (( OUT_BUF < 3 )) && continue
 
     if ! run_test "$OUT_BUF" "$CHUNK"; then
       echo -e "\tFAIL"
