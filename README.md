@@ -33,7 +33,7 @@ qli_save(img.pixels, img.width, img.height, "sample.qli");
 qli_image_t qli;
 uint8_t buffer[100];
 
-// data_size can be smaller than the compressed image but must be larger or equal than 3 bytes except at the end
+// data_size can be smaller than the compressed image
 qli_init( &qli, width, height, data, data_size, 0 );
 
 int bytes_written;
@@ -44,7 +44,7 @@ while ( 0 < qli_decode(&qli, buffer, MIN( sizeof(buffer), remaining_bytes ), &ne
   if ((new_chunk & QLI_RF_MORE_DATA) != 0)
   {
     // fetch new set of data and update buffers:
-    qli_new_chunk(&qli, new_data_ptr, new_data_size, is_last_chunk);
+    qli_new_chunk(&qli, new_data_ptr, new_data_size);
   }
 }
 ```
