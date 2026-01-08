@@ -58,9 +58,13 @@
 #define QLI_POSTFIX
 #endif
 
+#ifndef QLI_SINGLETON
+#define QLI_SINGLETON 0
+#endif
+
 // configuration value
 #ifndef QLI_STRIDE
-#define QLI_STRIDE 1
+#define QLI_STRIDE 0
 #endif
 
 // configuration value
@@ -251,6 +255,7 @@ void QLI_FUNC_NAME(qli_rewind, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) 
 int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *dest, int32_t byte_cnt, int *new_chunk, int *emitted);
 void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, uint8_t *data, int32_t data_size);
 int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *qli, int *new_chunk);
+int QLI_FUNC_NAME(qli_pixels_to_bytes, QLI_POSTFIX) (int pixels);
 #endif
 
 #ifdef QLI_ENCODE
@@ -367,10 +372,10 @@ static const uint8_t QLI_TYPE(qli_index_code, QLI_POSTFIX) []={0,0,0,0,1,2,3,0};
  #define QLI_G_FACTOR (16)
  #define QLI_B_FACTOR (16)
  #define QLI_CLAMP255(x) ((((x) > 255) ? 255 : (x))&0xff)
- #define QLI_RGB_PACK(r, g, b) ( \
+ #define QLI_RGB_PACK(r, g, b) (( \
     ((QLI_CLAMP255((r) + 8) >> 4) << 8)  | \
     ((QLI_CLAMP255((g) + 8) >> 4) << 4)  | \
-    ((QLI_CLAMP255((b) + 8) >> 4)) )
+    ((QLI_CLAMP255((b) + 8) >> 4)) ) & 0x0fff)
  #define QLI_PACK_GET_RED(rgb444)   (uint8_t)(((rgb444)>>4)&0xf0)
  #define QLI_PACK_GET_GREEN(rgb444) (uint8_t)(((rgb444)>>0)&0xf0)
  #define QLI_PACK_GET_BLUE(rgb444)  (uint8_t)(((rgb444)<<4)&0xf0)
@@ -473,11 +478,9 @@ void QLI_FUNC_NAME(qli_new_chunk, QLI_POSTFIX) ( QLI_TYPE(qli_image_t, QLI_POSTF
   if(NULL==qli) return;
   qli->data=data;
   qli->size=data_size;
-#if QLI_DEBUG > 1
-  fprintf(stderr,"NEWCHUNK qli->size=%d [",qli->size);
-  for(int i=0;i<qli->size;i++) fprintf(stderr,"%s%02x",i==0?"":" ",qli->data[i]);
-  fprintf(stderr,"]\n");
-#endif
+  DBG_PRINT(2,"NEWCHUNK qli->size=%d [",qli->size);
+  for(int i=0;i<qli->size;i++) DBG_PRINT(2,"%s%02x",i==0?"":" ",qli->data[i]);
+  DBG_PRINT(2,"]\n");
   qli->pos=0;
 }
 
@@ -517,6 +520,10 @@ int QLI_FUNC_NAME(qli_init_header, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTF
   return(0);
 }
 
+int QLI_FUNC_NAME(qli_pixels_to_bytes, QLI_POSTFIX) (int pixels)
+{
+  return( ( QLI_BPP2 * pixels ) / 2 );
+}
 
 #ifdef QLI_DECODE
 
@@ -559,9 +566,7 @@ int QLI_FUNC_NAME(qli_get_next_byte, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POS
     else
     {
       if(new_chunk) *new_chunk=QLI_RF_MORE_DATA; 
-#if QLI_DEBUG > 1
-      if(new_chunk) fprintf(stderr,"NEWCHUNK %d\n",__LINE__);
-#endif
+      if(new_chunk) DBG_PRINT(2,"NEWCHUNK %d\n",__LINE__);
       ret=-1;
     }
   }
@@ -697,7 +702,7 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *
     *new_chunk|=QLI_RF_END_OF_STREAM;
     TRACE_SUM();
     TRACE_QLI(qli, 1, bytes_cnt, *new_chunk, *emitted, 0);
-    return(0);
+    return(qli->pos - pos_1);
   }
 
   //--- FAST LOOP
@@ -784,7 +789,7 @@ int QLI_FUNC_NAME(qli_decode, QLI_POSTFIX) (QLI_TYPE(qli_image_t, QLI_POSTFIX) *
     *new_chunk|=QLI_RF_END_OF_STREAM;
     TRACE_SUM();
     TRACE_QLI(qli, 1, bytes_cnt, *new_chunk, *emitted, 0);
-    return(0);
+    return(qli->pos - pos_1);
   }
 
   *new_chunk|=QLI_RF_MORE_DATA;
@@ -822,12 +827,8 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
   int pos,opos;
   int out_cnt=0;
   uint32_t pix=0;
-#if QLI_PIXEL_FORMAT == QLI_PF_RGB444
-  uint16_t px;
-#else
   int i;
   qli_pixel_t px;
-#endif
   qli_pixel_t ppx=0,ppx_prev=0;
   int run=0,end;
 
@@ -853,9 +854,7 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
     {
       DBG_PRINT(1,"QLI_OP_RUN %d [%02x%02x%02x]\n",((run-QLI_MAX_RUN_VALUE)>0 ? QLI_MAX_RUN_VALUE : run) - 1, QLI_PACK_GET_RED(ppx_prev),QLI_PACK_GET_GREEN(ppx_prev),QLI_PACK_GET_BLUE(ppx_prev) );
       if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_RUN|( ((run-QLI_MAX_RUN_VALUE)>0 ? QLI_MAX_RUN_VALUE : run) - 1 );
-#if QLI_DEBUG > 1
-      else fprintf(stderr,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
-#endif
+      else DBG_PRINT(2,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
       run-=QLI_MAX_RUN_VALUE;
       out_cnt++;
     }
@@ -865,9 +864,7 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
     {
       DBG_PRINT(1,"QLI_OP_INDEX %d [%02x%02x%02x]\n",idx, QLI_PACK_GET_RED(ppx),QLI_PACK_GET_GREEN(ppx),QLI_PACK_GET_BLUE(ppx) );
       if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_INDEX|(idx);
-#if QLI_DEBUG > 1
-      else fprintf(stderr,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
-#endif
+      else DBG_PRINT(2,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
       out_cnt++;
       continue;
     }
@@ -879,9 +876,7 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
     {
       DBG_PRINT(1,"QLI_OP_DIFF [%02x%02x%02x]\n",QLI_PACK_GET_RED(ppx),QLI_PACK_GET_GREEN(ppx),QLI_PACK_GET_BLUE(ppx));
       if(NULL!=buf&&opos<bufsize) buf[opos++]=QLI_OP_DIFF|( (vr + 2) << 4 | (vg + 2) << 2 | (vb + 2) );
-#if QLI_DEBUG > 1
-      else fprintf(stderr,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
-#endif
+      else DBG_PRINT(2,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
       out_cnt++;
       continue;
     }
@@ -895,9 +890,7 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
         buf[opos++]=QLI_OP_LUMA | (vg+32);
         buf[opos++]=(vg_r+8)<<4 | (vg_b+8);
       }
-#if QLI_DEBUG > 1
-      else fprintf(stderr,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
-#endif
+      else DBG_PRINT(2,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
       out_cnt+=2;
       continue;
     }
@@ -905,16 +898,9 @@ int QLI_FUNC_NAME(qli_encode, QLI_POSTFIX) (uint32_t *rgb, int width, int height
     {
       DBG_PRINT(1,"QLI_OP_RGB [%02x%02x%02x]\n",QLI_PACK_GET_RED(ppx),QLI_PACK_GET_GREEN(ppx),QLI_PACK_GET_BLUE(ppx));
       buf[opos++]=QLI_OP_RGB;
-#if QLI_PIXEL_FORMAT == QLI_PF_RGB444
-      buf[opos++] = (px>>8)&0xf;
-      buf[opos++] = (px&0xff);
-#else
-      for(i=QLI_BPP-1;i>=0;--i) buf[opos++] = (px >> (i*8)) & 0xff;
-#endif
+      for(i=((QLI_BPP2+1)/2)-1;i>=0;--i) buf[opos++] = (px >> (i*8)) & 0xff;
     }
-#if QLI_DEBUG > 1
-      else fprintf(stderr,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
-#endif
+    else DBG_PRINT(2,"  buffer FULL!!! opos=%d bufsize=%ld\n",opos,bufsize);
     out_cnt+=((((QLI_BPP2)+1)/2)+1);
   }
   return(out_cnt);
@@ -958,6 +944,7 @@ int QLI_FUNC_NAME(qli_save, QLI_POSTFIX) (uint32_t *rgb, int width, int height, 
 
 #endif
 
+#if QLI_SINGLETON == 0
 #undef QLI_NOSTDIO
 #undef QLI_PIXEL_FORMAT
 #undef QLI_USERDATA
@@ -993,5 +980,6 @@ int QLI_FUNC_NAME(qli_save, QLI_POSTFIX) (uint32_t *rgb, int width, int height, 
 #undef QLI_MIN_OUTPUT_BUFFER_SIZE
 #undef qli_pixel_t
 #undef TRACE_QLI
+#endif
 
 #endif
