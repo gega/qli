@@ -5,3 +5,7 @@ qli:	qli.h qli.c
 
 test:	qli
 	./testprep.sh
+
+clean:
+	rm -f qli
+	./testprep.sh clean
