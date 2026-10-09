@@ -31,21 +31,34 @@ qli_save(img.pixels, img.width, img.height, "sample.qli");
 ```c
 
 qli_image_t qli;
-uint8_t buffer[100];
+uint8_t buffer[QLI_MIN_OUTPUT_BUFFER_SIZE * 34];
 
-// data_size can be smaller than the compressed image
-qli_init( &qli, width, height, data, data_size, 0 );
+int flags;
+int32_t bytes_written;
+int consumed;
 
-int bytes_written;
-while ( 0 < qli_decode(&qli, buffer, MIN( sizeof(buffer), remaining_bytes ), &new_chunk, &bytes_written))
-{
-  // Handle bytes_written of buffer
-  if ((new_chunk & QLI_RF_END_OF_STREAM) != 0) break;
-  if ((new_chunk & QLI_RF_MORE_DATA) != 0)
-  {
-    // fetch new set of data and update buffers:
-    qli_new_chunk(&qli, new_data_ptr, new_data_size);
-  }
+if (qli_init(&qli, width, height, data, data_size, 0) != 0)
+    return -1;
+
+for (;;) {
+    consumed = qli_decode(&qli, buffer, sizeof(buffer),
+                          &flags, &bytes_written);
+
+    // Handle bytes_written bytes of decoded pixels
+    if (bytes_written > 0) {
+        process_pixels(buffer, bytes_written);
+    }
+
+    if (flags & QLI_RF_END_OF_STREAM)
+        break;
+
+    if (flags & QLI_RF_MORE_DATA) {
+        // Fetch the next compressed input chunk
+        if (!fetch_next_chunk(&new_data_ptr, &new_data_size))
+            return -1; // Truncated input
+
+        qli_new_chunk(&qli, new_data_ptr, new_data_size);
+    }
 }
 ```
 
